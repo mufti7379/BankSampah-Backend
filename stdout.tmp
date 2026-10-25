@@ -1,0 +1,9 @@
+[90m2026-09-27 15:52:09[0m [32mINF[0m [1mLogger berhasil diinisialisasi[0m [36menvironment=[0mdevelopment [36mlog_level=[0mdebug
+[90m2026-09-27 15:52:09[0m [32mINF[0m [1mMemulai inisialisasi server...[0m [36mapp=[0m"BankSampahKu API" [36menv=[0mdevelopment [36mport=[0m8080
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /health                   --> main.main.func2 (3 handlers)
+[90m2026-09-27 15:52:09[0m [32mINF[0m [1mServer BankSampahKu aktif di http://localhost:8080[0m [36mbase_url=[0mhttp://localhost:8080 [36mport=[0m8080
+[90m2026-09-27 15:52:10[0m [32mINF[0m [1mHTTP Request[0m [36mip=[0m::1 [36mlatency=[0m0 [36mmethod=[0mGET [36mpath=[0m/health [36mstatus=[0m200
