@@ -155,6 +155,22 @@ go test ./...   # jalankan seluruh unit test
 gofmt -l .      # tampilkan file yang formatnya belum rapi (kosong = rapi)
 ```
 
+### Integration test (butuh PostgreSQL)
+
+`cmd/api/audit_integration_test.go` menjalankan API lengkap (route, middleware, migrasi, seeder) lalu memastikan:
+7 aksi wajib (`WEIGHING_CREATE`, `PRICE_UPDATE`, `NASABAH_CREATE`, `WITHDRAWAL_APPROVE/REJECT/COMPLETE`, `USER_DEACTIVATE`) tercatat tepat sekali,
+filter & pagination `GET /admin/audit-logs` benar, dan `audit_logs` tidak bisa diubah/dihapus.
+
+Test membuat database sementara `banksampahku_it_*` lalu menghapusnya kembali, jadi data development tidak tersentuh
+(user database butuh hak `CREATEDB`; user `postgres` sudah punya).
+
+```powershell
+$env:TEST_DATABASE_URL = "postgres://postgres:PASSWORD@localhost:5432/postgres?sslmode=disable"
+go test ./cmd/api -run Integration -v
+```
+
+Tanpa `TEST_DATABASE_URL` (atau dengan `-short`), test ini otomatis dilewati.
+
 ---
 
 ## 5. Reset Database
@@ -162,8 +178,8 @@ gofmt -l .      # tampilkan file yang formatnya belum rapi (kosong = rapi)
 Mengembalikan database ke kondisi awal (data seed) — berguna jika data uji sudah berantakan:
 
 ```powershell
-go run ./cmd/api -migrate=version          # lihat versi saat ini, misal version=5
-go run ./cmd/api -migrate=down -steps=5    # -steps = angka versi tersebut
+go run ./cmd/api -migrate=version          # lihat versi saat ini, misal version=8
+go run ./cmd/api -migrate=down -steps=8    # -steps = angka versi tersebut
 go run ./cmd/api -migrate=up
 go run ./cmd/api -seed
 ```
@@ -184,6 +200,7 @@ go run ./cmd/api -seed
 | `Akun terkunci` | Salah password 5×. Tunggu 15 menit, gunakan menu lupa password, atau restart server (development). |
 | Login gagal padahal password benar | `PASSWORD_PEPPER` berubah setelah seed → reset database (bagian 5). |
 | Email reset password tidak masuk | `SMTP_HOST` kosong = mode development: isi email dicetak di log server, bukan dikirim. |
+| `audit_logs bersifat append-only: DELETE tidak diizinkan` | Log aktivitas memang tidak boleh diubah/dihapus (trigger migrasi `0008`). Untuk mengosongkan data development, gunakan Reset Database (bagian 5). |
 
 ---
 
@@ -258,7 +275,7 @@ Prefix: `/api/v1`. 🔓 = publik, 👤 = login, 🛡️ = admin, 🎒 = nasabah.
 | GET | `/admin/weighings` | 🛡️ | Daftar penimbangan (filter tanggal & nasabah) |
 | GET | `/admin/weighings/:id` | 🛡️ | Detail penimbangan + item |
 | GET | `/admin/mutations` | 🛡️ | Mutasi saldo global (filter nasabah, tipe, sumber, periode) |
-| GET | `/admin/audit-logs` | 🛡️ | Log aktivitas admin (`?actor=`, `?action=`, `?entity_id=`, `?from=&to=`) — hanya baca |
+| GET | `/admin/audit-logs` | 🛡️ | Log aktivitas admin (`?actor=`, `?action=`, `?entity=`, `?entity_id=`, `?from=&to=`) — hanya baca; ubah/hapus juga ditolak trigger database |
 | GET | `/admin/audit-logs/actions` | 🛡️ | Daftar jenis aktivitas + label untuk filter |
 | GET | `/admin/reports/summary` | 🛡️ | Ringkasan periode + tren harian (`?from=&to=`, default bulan berjalan) |
 | GET | `/admin/reports/by-category` | 🛡️ | Rekap per kategori & jenis sampah + persentase |
@@ -283,7 +300,7 @@ Prefix: `/api/v1`. 🔓 = publik, 👤 = login, 🛡️ = admin, 🎒 = nasabah.
 
 ```text
 banksampahku-backend/
-├── cmd/api/main.go        # titik masuk: konfigurasi, middleware, rute
+├── cmd/api/               # main.go (konfigurasi, middleware, rute) + integration test
 ├── internal/
 │   ├── config/            # pembaca .env & logger
 │   ├── database/          # koneksi, migrasi, seeder

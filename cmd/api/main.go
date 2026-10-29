@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
 
 	"github.com/banksampahku/backend/internal/audit"
 	"github.com/banksampahku/backend/internal/auth"
@@ -107,12 +109,58 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
+	router, err := newRouter(cfg, db, passwordHasher)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Gagal menyiapkan router HTTP")
+	}
+
+	// Inisialisasi HTTP Server dengan timeout yang aman
+	server := &http.Server{
+		Addr:         ":" + cfg.AppPort,
+		Handler:      router,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Menjalankan server dalam goroutine terpisah untuk mendukung graceful shutdown
+	go func() {
+		log.Info().
+			Str("port", cfg.AppPort).
+			Str("base_url", cfg.AppBaseURL).
+			Msgf("Server BankSampahKu aktif di %s", cfg.AppBaseURL)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Gagal menjalankan HTTP server")
+		}
+	}()
+
+	// Menunggu sinyal OS (SIGINT, SIGTERM) untuk graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Info().Msg("Menerima sinyal shutdown, mematikan server secara aman...")
+
+	// Memberikan toleransi waktu 5 detik untuk menyelesaikan request yang sedang berjalan
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Error().Err(err).Msg("Server dimatikan secara paksa akibat timeout shutdown")
+	} else {
+		log.Info().Msg("Server BankSampahKu berhasil dimatikan dengan aman")
+	}
+}
+
+// newRouter merakit seluruh middleware & route API. Dipisah dari main() agar
+// integration test memakai wiring yang sama persis dengan server sungguhan.
+func newRouter(cfg *config.Config, db *gorm.DB, passwordHasher *utils.PasswordHasher) (*gin.Engine, error) {
 	router := gin.New()
 
 	// Hanya percayai X-Forwarded-For dari proxy yang terdaftar, agar IP client
 	// (dipakai rate limiter & audit log) tidak bisa dipalsukan lewat header.
 	if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
-		log.Fatal().Err(err).Msg("TRUSTED_PROXIES tidak valid")
+		return nil, fmt.Errorf("TRUSTED_PROXIES tidak valid: %w", err)
 	}
 
 	// Middleware recovery agar server tidak crash jika terjadi panic yang tidak terduga
@@ -256,42 +304,7 @@ func main() {
 	notificationHandler := notification.NewHandler(notification.NewService(notification.NewRepository(db)))
 	notificationHandler.RegisterRoutes(apiV1.Group("/notifications", requireAuth))
 
-	// Inisialisasi HTTP Server dengan timeout yang aman
-	server := &http.Server{
-		Addr:         ":" + cfg.AppPort,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Menjalankan server dalam goroutine terpisah untuk mendukung graceful shutdown
-	go func() {
-		log.Info().
-			Str("port", cfg.AppPort).
-			Str("base_url", cfg.AppBaseURL).
-			Msgf("Server BankSampahKu aktif di %s", cfg.AppBaseURL)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("Gagal menjalankan HTTP server")
-		}
-	}()
-
-	// Menunggu sinyal OS (SIGINT, SIGTERM) untuk graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Info().Msg("Menerima sinyal shutdown, mematikan server secara aman...")
-
-	// Memberikan toleransi waktu 5 detik untuk menyelesaikan request yang sedang berjalan
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Error().Err(err).Msg("Server dimatikan secara paksa akibat timeout shutdown")
-	} else {
-		log.Info().Msg("Server BankSampahKu berhasil dimatikan dengan aman")
-	}
+	return router, nil
 }
 
 // runMigrateCommand mengeksekusi perintah migrasi dari flag CLI lalu keluar.
